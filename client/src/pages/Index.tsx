@@ -6,14 +6,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Shield,
-  BarChart3,
-  Upload,
-  Map,
-  ArrowRight,
-  CheckCircle,
-} from "lucide-react";
+import { BarChart3, Upload, Map, ArrowRight, CheckCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const Index = () => {
@@ -53,8 +46,12 @@ const Index = () => {
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-primary rounded-lg flex items-center justify-center shadow-government">
-                <Shield className="h-6 w-6 text-primary-foreground" />
+              <div className="w-10 h-10 flex items-center justify-center">
+                <img
+                  src="/aqualens logo.png"
+                  alt="AquaLens Logo"
+                  className="w-full h-full object-contain"
+                />
               </div>
               <div>
                 <h1 className="text-lg font-bold text-foreground">AquaLens</h1>
@@ -237,11 +234,15 @@ const Index = () => {
         <div className="container mx-auto">
           <div className="flex flex-col md:flex-row justify-between items-center">
             <div className="flex items-center space-x-3 mb-4 md:mb-0">
-              <Shield className="h-6 w-6" />
+              <img
+                src="/aqualens logo.png"
+                alt="AquaLens Logo"
+                className="h-6 w-6 object-contain"
+              />
               <div>
-                <h3 className="font-bold">Government Research Portal</h3>
+                <h3 className="font-bold">AquaLens</h3>
                 <p className="text-sm text-primary-foreground/80">
-                  Secure. Compliant. Reliable.
+                  Water Quality Research Platform
                 </p>
               </div>
             </div>

@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Shield, BarChart3, Upload, Map, LogOut, Menu } from "lucide-react";
+import { BarChart3, Upload, Map, LogOut, Menu } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useState } from "react";
 
@@ -20,9 +20,13 @@ const Navigation = () => {
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link to="/dashboard" className="flex items-center space-x-2 group">
-            <div className="w-10 h-10 bg-gradient-primary rounded-lg flex items-center justify-center shadow-government group-hover:shadow-lg transition-all duration-300">
-              <Shield className="h-6 w-6 text-primary-foreground" />
+          <Link to="/dashboard" className="flex items-center space-x-3 group">
+            <div className="w-10 h-10 flex items-center justify-center group-hover:scale-105 transition-all duration-300">
+              <img
+                src="/aqualens logo.png"
+                alt="AquaLens Logo"
+                className="w-full h-full object-contain"
+              />
             </div>
             <div className="hidden sm:block">
               <h1 className="text-lg font-bold text-foreground">AquaLens</h1>
