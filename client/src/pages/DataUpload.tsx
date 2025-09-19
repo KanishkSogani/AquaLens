@@ -18,8 +18,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Upload, FileSpreadsheet, Plus, X, AlertCircle } from "lucide-react";
+import {
+  Upload,
+  FileSpreadsheet,
+  Plus,
+  X,
+  AlertCircle,
+  CheckCircle,
+  Loader2,
+} from "lucide-react";
 import { useState, useRef } from "react";
+
+// API Configuration
+const API_BASE_URL = "http://localhost:8001";
 
 const DataUpload = () => {
   // CSV Upload state
@@ -69,6 +80,18 @@ const DataUpload = () => {
     0: "",
   });
 
+  // Upload states for feedback
+  const [csvUploading, setCsvUploading] = useState(false);
+  const [csvUploadSuccess, setCsvUploadSuccess] = useState<string | null>(null);
+  const [csvUploadError, setCsvUploadError] = useState<string | null>(null);
+  const [manualUploading, setManualUploading] = useState(false);
+  const [manualUploadSuccess, setManualUploadSuccess] = useState<string | null>(
+    null
+  );
+  const [manualUploadError, setManualUploadError] = useState<string | null>(
+    null
+  );
+
   // File upload handlers
   const handleFileSelect = () => {
     fileInputRef.current?.click();
@@ -87,7 +110,7 @@ const DataUpload = () => {
     setCsvFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleCsvSubmit = () => {
+  const handleCsvSubmit = async () => {
     if (!csvFormData.name.trim()) {
       alert("Dataset name is required");
       return;
@@ -96,8 +119,48 @@ const DataUpload = () => {
       alert("Please select a CSV file");
       return;
     }
-    // TODO: Implement CSV upload logic
-    console.log("CSV Upload:", { ...csvFormData, file: csvFile });
+
+    setCsvUploading(true);
+    setCsvUploadError(null);
+    setCsvUploadSuccess(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", csvFile);
+
+      const url = new URL(`${API_BASE_URL}/upload-csv`);
+      url.searchParams.append("dataset_name", csvFormData.name.trim());
+      if (csvFormData.description.trim()) {
+        url.searchParams.append("description", csvFormData.description.trim());
+      }
+
+      const response = await fetch(url.toString(), {
+        method: "POST",
+        body: formData,
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setCsvUploadSuccess(
+          `Dataset "${result.dataset_name}" uploaded successfully! Processed ${result.total_samples} samples.`
+        );
+        // Reset form
+        setCsvFormData({ name: "", description: "" });
+        setCsvFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "Upload failed");
+      }
+    } catch (error) {
+      setCsvUploadError(
+        error instanceof Error ? error.message : "Upload failed"
+      );
+    } finally {
+      setCsvUploading(false);
+    }
   };
 
   // Manual entry handlers
@@ -195,12 +258,103 @@ const DataUpload = () => {
     return true;
   };
 
-  const handleManualSubmit = () => {
+  const handleManualSubmit = async () => {
     if (!validateManualEntry()) {
       return;
     }
-    // TODO: Implement manual entry submission logic
-    console.log("Manual Entry:", { ...manualFormData, rows: manualRows });
+
+    setManualUploading(true);
+    setManualUploadError(null);
+    setManualUploadSuccess(null);
+
+    try {
+      // Convert manual data to CSV format
+      const csvData = convertManualDataToCSV();
+      const csvBlob = new Blob([csvData], { type: "text/csv" });
+      const csvFile = new File(
+        [csvBlob],
+        `${manualFormData.name.replace(/[^a-z0-9]/gi, "_")}.csv`,
+        { type: "text/csv" }
+      );
+
+      const formData = new FormData();
+      formData.append("file", csvFile);
+
+      const url = new URL(`${API_BASE_URL}/upload-csv`);
+      url.searchParams.append("dataset_name", manualFormData.name.trim());
+      if (manualFormData.description.trim()) {
+        url.searchParams.append(
+          "description",
+          manualFormData.description.trim()
+        );
+      }
+
+      const response = await fetch(url.toString(), {
+        method: "POST",
+        body: formData,
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setManualUploadSuccess(
+          `Dataset "${result.dataset_name}" created successfully! Processed ${result.total_samples} samples.`
+        );
+        // Reset form
+        setManualFormData({ name: "", description: "" });
+        setManualRows([
+          {
+            sampleId: "",
+            city: "",
+            latitude: "",
+            longitude: "",
+            metals: {},
+          },
+        ]);
+        setDropdownValues({ 0: "" });
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "Upload failed");
+      }
+    } catch (error) {
+      setManualUploadError(
+        error instanceof Error ? error.message : "Upload failed"
+      );
+    } finally {
+      setManualUploading(false);
+    }
+  };
+
+  // Helper function to convert manual data to CSV
+  const convertManualDataToCSV = () => {
+    // Get all unique metals from all rows
+    const allMetals = new Set<string>();
+    manualRows.forEach((row) => {
+      Object.keys(row.metals).forEach((metal) => allMetals.add(metal));
+    });
+
+    const metalColumns = Array.from(allMetals).sort();
+    const headers = [
+      "Sampleid",
+      "City",
+      "Latitude",
+      "Longitude",
+      ...metalColumns,
+    ];
+
+    const csvRows = [headers.join(",")];
+
+    manualRows.forEach((row) => {
+      const csvRow = [
+        row.sampleId || "",
+        row.city,
+        row.latitude,
+        row.longitude,
+        ...metalColumns.map((metal) => row.metals[metal] || ""),
+      ];
+      csvRows.push(csvRow.join(","));
+    });
+
+    return csvRows.join("\n");
   };
 
   return (
@@ -325,12 +479,33 @@ const DataUpload = () => {
                       </p>
                     </div>
 
+                    {/* Success/Error Messages */}
+                    {csvUploadSuccess && (
+                      <div className="flex items-center text-green-600 text-sm py-3 px-4 bg-green-50 border border-green-200 rounded-lg">
+                        <CheckCircle className="h-4 w-4 mr-2 flex-shrink-0" />
+                        {csvUploadSuccess}
+                      </div>
+                    )}
+                    {csvUploadError && (
+                      <div className="flex items-center text-red-600 text-sm py-3 px-4 bg-red-50 border border-red-200 rounded-lg">
+                        <AlertCircle className="h-4 w-4 mr-2 flex-shrink-0" />
+                        {csvUploadError}
+                      </div>
+                    )}
+
                     <Button
                       onClick={handleCsvSubmit}
-                      className="w-full bg-gradient-primary hover:bg-primary-hover transition-smooth shadow-government"
+                      disabled={
+                        csvUploading || !csvFormData.name.trim() || !csvFile
+                      }
+                      className="w-full bg-gradient-primary hover:bg-primary-hover transition-smooth shadow-government disabled:opacity-50"
                     >
-                      <Upload className="h-4 w-4 mr-2" />
-                      Upload Dataset
+                      {csvUploading ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4 mr-2" />
+                      )}
+                      {csvUploading ? "Uploading..." : "Upload Dataset"}
                     </Button>
                   </div>
                 </TabsContent>
@@ -560,12 +735,33 @@ const DataUpload = () => {
                         ))}
                       </div>
 
+                      {/* Success/Error Messages */}
+                      {manualUploadSuccess && (
+                        <div className="flex items-center text-green-600 text-sm py-3 px-4 bg-green-50 border border-green-200 rounded-lg">
+                          <CheckCircle className="h-4 w-4 mr-2 flex-shrink-0" />
+                          {manualUploadSuccess}
+                        </div>
+                      )}
+                      {manualUploadError && (
+                        <div className="flex items-center text-red-600 text-sm py-3 px-4 bg-red-50 border border-red-200 rounded-lg">
+                          <AlertCircle className="h-4 w-4 mr-2 flex-shrink-0" />
+                          {manualUploadError}
+                        </div>
+                      )}
+
                       <Button
                         onClick={handleManualSubmit}
-                        className="w-full bg-gradient-primary hover:bg-primary-hover transition-smooth shadow-government"
+                        disabled={
+                          manualUploading || !manualFormData.name.trim()
+                        }
+                        className="w-full bg-gradient-primary hover:bg-primary-hover transition-smooth shadow-government disabled:opacity-50"
                       >
-                        <Plus className="h-4 w-4 mr-2" />
-                        Save Data Points
+                        {manualUploading ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Plus className="h-4 w-4 mr-2" />
+                        )}
+                        {manualUploading ? "Saving..." : "Save Data Points"}
                       </Button>
                     </div>
                   </div>
