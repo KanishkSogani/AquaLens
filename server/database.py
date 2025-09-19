@@ -679,15 +679,33 @@ class WaterQualityDB:
         """Get database statistics"""
         with sqlite3.connect(self.db_path) as conn:
             cities = conn.execute("SELECT COUNT(*) FROM cities").fetchone()[0]
-            samples = conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
-            cities_with_data = conn.execute("SELECT COUNT(*) FROM city_summary").fetchone()[0]
+            # Count from dataset_samples table instead of samples table
+            samples = conn.execute("SELECT COUNT(*) FROM dataset_samples").fetchone()[0]
+            # Count cities that have data in dataset_samples
+            cities_with_data = conn.execute("""
+                SELECT COUNT(DISTINCT city_id) FROM dataset_samples 
+                WHERE hmpi_value IS NOT NULL
+            """).fetchone()[0]
             datasets = conn.execute("SELECT COUNT(*) FROM datasets").fetchone()[0]
+            
+            # Get pollution distribution from dataset_samples
+            pollution_dist_result = conn.execute("""
+                SELECT classification, COUNT(*) as count 
+                FROM dataset_samples 
+                WHERE classification IS NOT NULL 
+                GROUP BY classification
+            """).fetchall()
+            
+            pollution_distribution = {}
+            for row in pollution_dist_result:
+                pollution_distribution[row[0]] = row[1]
             
             return {
                 "total_cities": cities,
                 "total_samples": samples,
                 "cities_with_data": cities_with_data,
-                "total_datasets": datasets
+                "total_datasets": datasets,
+                "pollution_distribution": pollution_distribution
             }
 
 # Global database instance
