@@ -201,7 +201,7 @@ class WaterQualityDB:
             raise Exception(f"Error saving data: {str(e)}")
     
     def update_city_summaries(self):
-        """Update city summary data"""
+        """Update city summary data from dataset_samples (includes manual entries)"""
         try:
             with sqlite3.connect(self.db_path, timeout=30.0) as conn:
                 conn.execute("BEGIN IMMEDIATE")
@@ -212,14 +212,15 @@ class WaterQualityDB:
                     INSERT INTO city_summary (city_id, latest_hmpi, latest_classification, 
                                             total_samples, last_updated)
                     SELECT 
-                        s.city_id,
-                        s.hmpi_value,
-                        s.classification,
+                        ds.city_id,
+                        ds.hmpi_value,
+                        ds.classification,
                         COUNT(*),
-                        MAX(s.upload_date)
-                    FROM samples s
-                    WHERE s.hmpi_value IS NOT NULL
-                    GROUP BY s.city_id
+                        MAX(d.upload_date)
+                    FROM dataset_samples ds
+                    JOIN datasets d ON ds.dataset_id = d.id
+                    WHERE ds.hmpi_value IS NOT NULL
+                    GROUP BY ds.city_id
                 """)
                 
                 conn.commit()
@@ -229,9 +230,9 @@ class WaterQualityDB:
             # If locked, skip summary update for now
     
     def get_city_data(self, city_name):
-        """Get comprehensive HMPI data for a city"""
+        """Get comprehensive HMPI data for a city (includes manual and CSV uploads)"""
         with sqlite3.connect(self.db_path) as conn:
-            # Get city info and all samples
+            # Get city info and all samples from dataset_samples table
             cursor = conn.execute("""
                 SELECT c.id, c.name, c.state, c.country, c.latitude, c.longitude
                 FROM cities c
@@ -244,12 +245,14 @@ class WaterQualityDB:
             if city_result:
                 city_id, name, state, country, city_lat, city_lon = city_result
                 
-                # Get all samples for this city
+                # Get all samples for this city from dataset_samples (includes manual entries)
                 cursor = conn.execute("""
-                    SELECT latitude, longitude, hmpi_value, classification, upload_date
-                    FROM samples 
-                    WHERE city_id = ? AND hmpi_value IS NOT NULL
-                    ORDER BY upload_date DESC
+                    SELECT ds.latitude, ds.longitude, ds.hmpi_value, ds.classification, 
+                           d.upload_date, ds.sample_id, d.name as dataset_name
+                    FROM dataset_samples ds
+                    JOIN datasets d ON ds.dataset_id = d.id
+                    WHERE ds.city_id = ? AND ds.hmpi_value IS NOT NULL
+                    ORDER BY d.upload_date DESC
                 """, (city_id,))
                 
                 samples = cursor.fetchall()
@@ -263,6 +266,14 @@ class WaterQualityDB:
                     class_counts = {}
                     for classification in classifications:
                         class_counts[classification] = class_counts.get(classification, 0) + 1
+                    
+                    # Group by dataset
+                    dataset_breakdown = {}
+                    for sample in samples:
+                        dataset_name = sample[6]
+                        if dataset_name not in dataset_breakdown:
+                            dataset_breakdown[dataset_name] = 0
+                        dataset_breakdown[dataset_name] += 1
                     
                     return {
                         "city": name,
@@ -279,15 +290,18 @@ class WaterQualityDB:
                                 "max": max(hmpi_values),
                                 "average": round(sum(hmpi_values) / len(hmpi_values), 2)
                             },
-                            "pollution_distribution": class_counts
+                            "pollution_distribution": class_counts,
+                            "dataset_breakdown": dataset_breakdown
                         },
                         "sample_locations": [
                             {
+                                "sample_id": s[5],
                                 "latitude": s[0],
                                 "longitude": s[1], 
                                 "hmpi": s[2],
                                 "classification": s[3],
-                                "date": s[4]
+                                "date": s[4],
+                                "dataset": s[6]
                             } for s in samples[:10]  # Limit to latest 10 for performance
                         ],
                         "all_samples_count": len(samples)
@@ -334,16 +348,16 @@ class WaterQualityDB:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("""
                 SELECT DISTINCT c.name, c.state, c.latitude, c.longitude,
-                       COUNT(s.id) as sample_count,
-                       AVG(s.hmpi_value) as avg_hmpi,
-                       MAX(s.hmpi_value) as max_hmpi,
-                       MIN(s.hmpi_value) as min_hmpi,
+                       COUNT(ds.id) as sample_count,
+                       AVG(ds.hmpi_value) as avg_hmpi,
+                       MAX(ds.hmpi_value) as max_hmpi,
+                       MIN(ds.hmpi_value) as min_hmpi,
                        (ABS(c.latitude - ?) + ABS(c.longitude - ?)) * 111 as distance_km
                 FROM cities c
-                INNER JOIN samples s ON c.id = s.city_id
+                INNER JOIN dataset_samples ds ON c.id = ds.city_id
                 WHERE ABS(c.latitude - ?) <= ? 
                 AND ABS(c.longitude - ?) <= ?
-                AND s.hmpi_value IS NOT NULL
+                AND ds.hmpi_value IS NOT NULL
                 AND LOWER(c.name) != LOWER(?)
                 GROUP BY c.id, c.name, c.state, c.latitude, c.longitude
                 ORDER BY distance_km ASC
@@ -667,6 +681,98 @@ class WaterQualityDB:
                 "download_filename": f"report_{name.replace(' ', '_')}.csv"
             }
 
+    def create_manual_dataset(self, dataset_name, description, sample_data_list):
+        """
+        Create a dataset manually with provided sample data
+        sample_data_list: List of dictionaries with sample information
+        Each dict should contain: latitude, longitude, city, hmpi_value, classification, and metal concentrations
+        """
+        import json
+        
+        try:
+            with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+                # Insert dataset record
+                cursor = conn.execute("""
+                    INSERT INTO datasets (name, description, original_filename, total_samples, enhanced_csv_data, metadata)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    dataset_name,
+                    description,
+                    "Manual Entry",
+                    len(sample_data_list),
+                    "",  # Will generate CSV after samples are inserted
+                    json.dumps({"source": "manual_entry", "samples": len(sample_data_list)})
+                ))
+                
+                dataset_id = cursor.lastrowid
+                
+                # Process each sample
+                for i, sample_data in enumerate(sample_data_list):
+                    lat = float(sample_data['latitude'])
+                    lon = float(sample_data['longitude'])
+                    city_name = sample_data['city']
+                    
+                    # Find or create city
+                    city_cursor = conn.execute("""
+                        SELECT id FROM cities 
+                        WHERE ABS(latitude - ?) < 0.05 AND ABS(longitude - ?) < 0.05
+                        LIMIT 1
+                    """, (lat, lon))
+                    
+                    city_result = city_cursor.fetchone()
+                    if city_result:
+                        city_id = city_result[0]
+                    else:
+                        # Create new city
+                        city_cursor = conn.execute("""
+                            INSERT INTO cities (name, state, country, latitude, longitude)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (city_name, 'Unknown State', 'Unknown Country', lat, lon))
+                        city_id = city_cursor.lastrowid
+                    
+                    # Insert sample
+                    sample_id = sample_data.get('sample_id', f"MANUAL_{dataset_id}_{i+1:03d}")
+                    hmpi_value = float(sample_data['hmpi_value']) if sample_data.get('hmpi_value') else None
+                    classification = sample_data.get('classification', 'Unknown')
+                    
+                    conn.execute("""
+                        INSERT INTO dataset_samples (dataset_id, sample_id, city_id, latitude, longitude, 
+                                                   hmpi_value, classification, raw_data)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        dataset_id,
+                        sample_id,
+                        city_id,
+                        lat, lon,
+                        hmpi_value,
+                        classification,
+                        json.dumps(sample_data)
+                    ))
+                
+                # Generate CSV content for the dataset
+                csv_lines = ["Sampleid,Latitude,Longitude,City,HMPI,Classification"]
+                for sample in sample_data_list:
+                    sample_id = sample.get('sample_id', f"MANUAL_{dataset_id}_{sample_data_list.index(sample)+1:03d}")
+                    line = f"{sample_id},{sample['latitude']},{sample['longitude']},{sample['city']},{sample.get('hmpi_value', '')},{sample.get('classification', '')}"
+                    csv_lines.append(line)
+                
+                csv_content = "\n".join(csv_lines)
+                
+                # Update dataset with CSV content
+                conn.execute("""
+                    UPDATE datasets SET enhanced_csv_data = ? WHERE id = ?
+                """, (csv_content, dataset_id))
+                
+                conn.commit()
+                
+                # Update city summaries
+                self.update_city_summaries()
+                
+                return dataset_id
+                
+        except Exception as e:
+            raise Exception(f"Error creating manual dataset: {str(e)}")
+
     def delete_dataset(self, dataset_id):
         """Delete a dataset and its samples"""
         with sqlite3.connect(self.db_path, timeout=30.0) as conn:
@@ -676,7 +782,7 @@ class WaterQualityDB:
             return True
 
     def get_stats(self):
-        """Get database statistics"""
+        """Get database statistics with detailed pollution breakdown"""
         with sqlite3.connect(self.db_path) as conn:
             cities = conn.execute("SELECT COUNT(*) FROM cities").fetchone()[0]
             # Count from dataset_samples table instead of samples table
@@ -700,12 +806,51 @@ class WaterQualityDB:
             for row in pollution_dist_result:
                 pollution_distribution[row[0]] = row[1]
             
+            # Get city-level pollution statistics
+            city_pollution_result = conn.execute("""
+                SELECT c.name, AVG(ds.hmpi_value) as avg_hmpi, COUNT(ds.id) as sample_count
+                FROM cities c
+                JOIN dataset_samples ds ON c.id = ds.city_id
+                WHERE ds.hmpi_value IS NOT NULL
+                GROUP BY c.id, c.name
+            """).fetchall()
+            
+            # Categorize cities by pollution level
+            city_pollution_levels = {
+                "low": [],      # HMPI < 100
+                "moderate": [], # HMPI 100-200
+                "high": [],     # HMPI 200-300
+                "critical": []  # HMPI > 300
+            }
+            
+            for city_name, avg_hmpi, sample_count in city_pollution_result:
+                city_info = {"name": city_name, "avg_hmpi": round(avg_hmpi, 2), "samples": sample_count}
+                
+                if avg_hmpi < 100:
+                    city_pollution_levels["low"].append(city_info)
+                elif avg_hmpi < 200:
+                    city_pollution_levels["moderate"].append(city_info)
+                elif avg_hmpi < 300:
+                    city_pollution_levels["high"].append(city_info)
+                else:
+                    city_pollution_levels["critical"].append(city_info)
+            
+            # Count cities by pollution level
+            city_counts = {
+                "low_pollution_cities": len(city_pollution_levels["low"]),
+                "moderate_pollution_cities": len(city_pollution_levels["moderate"]),
+                "high_pollution_cities": len(city_pollution_levels["high"]),
+                "critical_pollution_cities": len(city_pollution_levels["critical"])
+            }
+            
             return {
                 "total_cities": cities,
                 "total_samples": samples,
                 "cities_with_data": cities_with_data,
                 "total_datasets": datasets,
-                "pollution_distribution": pollution_distribution
+                "sample_pollution_distribution": pollution_distribution,
+                "city_pollution_breakdown": city_pollution_levels,
+                "city_pollution_counts": city_counts
             }
 
 # Global database instance

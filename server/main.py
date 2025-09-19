@@ -36,7 +36,8 @@ def root():
             "batch_processing": "Multiple sample analysis"
         },
         "endpoints": {
-            "upload_csv": "/upload-csv/ (POST) - Upload and save dataset",
+            "upload_csv": "/upload-csv/ (POST) - Upload and save dataset from CSV",
+            "manual_dataset": "/datasets/manual (POST) - Create dataset manually",
             "list_datasets": "/datasets (GET) - Get all saved datasets",
             "generate_report": "/datasets/{id}/report (GET) - Generate report",
             "download_csv": "/datasets/{id}/download (GET) - Download enhanced CSV",
@@ -46,15 +47,17 @@ def root():
             "all_cities": "/cities/all (GET)",
             "nearby_search": "/cities/nearby/{city_name} (GET)",
             "compare_cities": "/compare/{city1}/{city2} (GET)",
-            "database_stats": "/database/stats (GET)",
+            "database_stats": "/database/stats (GET) - Enhanced with city pollution levels",
             "docs": "/docs",
             "health": "/"
         },
         "workflow": {
-            "step_1": "Upload CSV with dataset name: POST /upload-csv",
+            "option_1": "Upload CSV: POST /upload-csv",
+            "option_2": "Manual entry: POST /datasets/manual",
             "step_2": "List saved datasets: GET /datasets", 
             "step_3": "Generate report: GET /datasets/{id}/report",
             "step_4": "Download CSV: GET /datasets/{id}/download",
-            "step_5": "Analyze cities: GET /city/{name} or /compare/{city1}/{city2}"
+            "step_5": "View enhanced stats: GET /database/stats",
+            "step_6": "Analyze cities: GET /city/{name} or /compare/{city1}/{city2}"
         }
     }
