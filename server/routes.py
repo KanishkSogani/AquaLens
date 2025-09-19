@@ -1,9 +1,10 @@
-from fastapi import APIRouter, File, UploadFile, HTTPException, Query
+from fastapi import APIRouter, File, UploadFile, HTTPException, Query, Body
 from fastapi.responses import StreamingResponse
 import pandas as pd
 import numpy as np
 import base64
 from io import StringIO
+from typing import List, Dict, Any
 from services import process_csv_data, get_summary_stats
 from database import db
 
@@ -59,6 +60,56 @@ async def upload_csv(
     
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error processing CSV: {str(e)}")
+
+@router.post("/datasets/manual")
+async def create_manual_dataset(
+    dataset_name: str = Query(..., description="Name for this dataset"),
+    description: str = Query("", description="Optional description for the dataset"),
+    sample_data: List[Dict[str, Any]] = Body(..., description="List of sample data")
+):
+    """Create a dataset manually by providing sample data directly"""
+    
+    # Validate dataset name
+    if not dataset_name.strip():
+        raise HTTPException(status_code=400, detail="Dataset name is required")
+    
+    # Validate sample data
+    if not sample_data or len(sample_data) == 0:
+        raise HTTPException(status_code=400, detail="At least one sample is required")
+    
+    # Validate each sample has required fields
+    required_fields = ['latitude', 'longitude', 'city']
+    for i, sample in enumerate(sample_data):
+        for field in required_fields:
+            if field not in sample:
+                raise HTTPException(status_code=400, detail=f"Sample {i+1} missing required field: {field}")
+        
+        # Validate coordinate types
+        try:
+            float(sample['latitude'])
+            float(sample['longitude'])
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail=f"Sample {i+1} has invalid coordinates")
+    
+    try:
+        # Create manual dataset
+        dataset_id = db.create_manual_dataset(
+            dataset_name.strip(), 
+            description.strip() if description.strip() else "Manual entry dataset",
+            sample_data
+        )
+        
+        return {
+            "message": "Manual dataset created successfully",
+            "dataset_id": dataset_id,
+            "dataset_name": dataset_name,
+            "description": description if description.strip() else "Manual entry dataset",
+            "total_samples": len(sample_data),
+            "source": "manual_entry"
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error creating manual dataset: {str(e)}")
 
 @router.get("/datasets")
 async def get_datasets():
